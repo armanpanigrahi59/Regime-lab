@@ -8,8 +8,16 @@ API docs:     /docs
 """
 import os
 import time
+import warnings
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
+
+# Prevent loky subprocess core-detection failure and warnings on Windows
+os.environ["LOKY_MAX_CPU_COUNT"] = str(os.cpu_count() or 4)
+warnings.filterwarnings("ignore", message=".*physical cores.*")
+warnings.filterwarnings("ignore", category=UserWarning, module=".*loky.*")
+warnings.filterwarnings("ignore", category=UserWarning, module=".*joblib.*")
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,8 +73,8 @@ def health():
     return {"status": "ok", "uptime_s": round(time.time() - STARTED, 1), "on_vercel": bool(os.environ.get("VERCEL"))}
 
 
-@app.get("/api/overview", tags=["meta"], summary="Datasets, headline numbers and today's regime")
-def overview():
+@lru_cache(maxsize=1)
+def _overview_payload():
     F, R, r, v = stock_features(), daily_returns(), sp500_returns(), vix_close()
     reg = regimes.regimes(3, 1871, 2026)
     cl = clustering.run_clustering("kmeans", 4)
@@ -76,7 +84,7 @@ def overview():
     spans = {"D1": f"{R.index[0]:%b %Y} – {R.index[-1]:%b %Y}", "D3": f"{r.index[0]:%b %Y} – {r.index[-1]:%b %Y}",
              "D4": f"{v.index[0]:%b %Y} – {v.index[-1]:%b %Y}"}
     ds = [{**d, "size": sizes[d["id"]], "span": spans.get(d["id"], d["span"])} for d in DATASETS]
-    return ok({
+    return clean({
         "datasets": ds,
         "now": {**reg["now"], "names": reg["names"], "colors": reg["colors"]},
         "headline": {
@@ -89,6 +97,11 @@ def overview():
         "spark": {"dates": reg["series"]["dates"][-240:], "price": reg["series"]["price"][-240:],
                   "state": reg["series"]["state"][-240:]},
     })
+
+
+@app.get("/api/overview", tags=["meta"], summary="Datasets, headline numbers and today's regime")
+def overview():
+    return JSONResponse(_overview_payload())
 
 
 # ------------------------------------------------------------------ clustering
@@ -126,16 +139,21 @@ def lab_kmeans(k: int = Query(4, ge=2, le=8), dataset: Literal["stocks", "blobs"
     return ok(clustering.kmeans_animation(k, dataset, seed))
 
 
-@app.get("/api/stocks", tags=["stocks"], summary="Ticker list for search")
-def stocks():
+@lru_cache(maxsize=1)
+def _stocks_payload():
     F = stock_features()
     res = clustering.run_clustering("kmeans", 4)
-    return ok([{"ticker": t, "sector": s, "cluster": c} for t, s, c in zip(F.index, F.sector, res["points"]["cluster"])])
+    return clean([{"ticker": t, "sector": s, "cluster": c} for t, s, c in zip(F.index, F.sector, res["points"]["cluster"])])
+
+
+@app.get("/api/stocks", tags=["stocks"], summary="Ticker list for search")
+def stocks():
+    return JSONResponse(_stocks_payload())
 
 
 @app.get("/api/stocks/{ticker}", tags=["stocks"], summary="One stock's fingerprint, cluster and nearest look-alikes")
 def stock(ticker: str):
-    d = clustering.stock_detail(ticker.upper(), daily_returns())
+    d = clustering.stock_detail(ticker.upper())
     if d is None:
         raise HTTPException(404, f"{ticker.upper()} is not in the 477-stock universe")
     return ok(d)

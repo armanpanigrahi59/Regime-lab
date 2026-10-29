@@ -30,7 +30,7 @@ html, body { height: 100%; }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 var(--body); font-variant-numeric: tabular-nums; }
 button, input, select { font: inherit; color: inherit; }
 a { color: var(--accent); }
-[hidden] { display: none !important; }
+[hidden], .drawer[hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------------------------------------------------------------- shell */

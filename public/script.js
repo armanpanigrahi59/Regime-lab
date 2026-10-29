@@ -5,23 +5,36 @@
 // Shared helpers: API calls, loading states, formatting and the Plotly theme.
 
 const cache = new Map();
+const inFlight = new Map();
 
 async function api(path, params = {}, { useCache = true } = {}) {
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== ''));
-  const url = `api/${path}${qs.toString() ? '?' + qs : ''}`;
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  const url = `/api/${cleanPath}${qs.toString() ? '?' + qs : ''}`;
   if (useCache && cache.has(url)) return cache.get(url);
-  const t0 = performance.now();
-  const res = await fetch(url);
-  const ms = performance.now() - t0;
-  if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch (e) { /* keep status text */ }
-    throw new Error(msg);
-  }
-  const data = await res.json();
-  const out = { data, url: '/' + url, ms, server: Number(res.headers.get('X-Compute-Ms')) };
-  cache.set(url, out);
-  return out;
+  if (inFlight.has(url)) return inFlight.get(url);
+
+  const fetchPromise = (async () => {
+    try {
+      const t0 = performance.now();
+      const res = await fetch(url);
+      const ms = performance.now() - t0;
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch (e) { /* keep status text */ }
+        throw new Error(msg);
+      }
+      const data = await res.json();
+      const out = { data, url, ms, server: Number(res.headers.get('X-Compute-Ms')) };
+      if (useCache) cache.set(url, out);
+      return out;
+    } finally {
+      inFlight.delete(url);
+    }
+  })();
+
+  inFlight.set(url, fetchPromise);
+  return fetchPromise;
 }
 
 function computeChip(el, call) {
@@ -100,7 +113,14 @@ function layout(extra = {}) {
 const plotConfig = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d', 'toggleSpikelines'] };
 
 function plot(el, traces, lay = {}) {
-  return Plotly.react(el, traces, layout(lay), plotConfig);
+  if (!el) return Promise.resolve(null);
+  const arr = Array.isArray(traces) ? traces : [traces];
+  const safeTraces = arr.map((t) => {
+    if (!t) return t;
+    if (t.type === 'scattergl') return { ...t, type: 'scatter' };
+    return t;
+  });
+  return Plotly.react(el, safeTraces, layout(lay), plotConfig);
 }
 
 function hexA(hex, a) {
@@ -373,7 +393,16 @@ const VIEW_clustering = (() => {
       run(root);
       loadK(root);
       api('stocks').then((c) => { tickers = c.data; });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#cl-drawer', root).hidden = true; });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const dr = $('#cl-drawer', root);
+          if (dr && !dr.hidden) {
+            dr.hidden = true;
+            highlight = null;
+            if (result) drawScatter(root);
+          }
+        }
+      });
     },
   };
 
@@ -406,7 +435,7 @@ const VIEW_clustering = (() => {
     const traces = result.order.map((name) => {
       const idx = p.cluster.map((c, i) => (c === name ? i : -1)).filter((i) => i >= 0);
       return {
-        type: 'scattergl', mode: 'markers', name, x: idx.map((i) => p.x[i]), y: idx.map((i) => p.y[i]),
+        type: 'scatter', mode: 'markers', name, x: idx.map((i) => p.x[i]), y: idx.map((i) => p.y[i]),
         customdata: idx.map((i) => p.ticker[i]),
         text: idx.map((i) => `<b>${p.ticker[i]}</b> · ${p.sector[i]}<br>${name}<br>return ${(p.ret[i] * 100).toFixed(1)}%/yr · vol ${(p.vol[i] * 100).toFixed(0)}% · β ${p.beta[i]}`),
         hovertemplate: '%{text}<extra></extra>',
@@ -429,8 +458,15 @@ const VIEW_clustering = (() => {
       yaxis: { title: { text: 'PC2: more return →', font: { size: 12.5 } }, zeroline: false },
       annotations: ann, margin: { l: 56, r: 12, t: 30, b: 46 },
     });
-    el.removeAllListeners && el.removeAllListeners('plotly_click');
-    el.on('plotly_click', (ev) => { const t = ev.points[0] && ev.points[0].customdata; if (t) openStock(root, t); });
+    if (el && typeof el.removeAllListeners === 'function') {
+      try { el.removeAllListeners('plotly_click'); } catch (e) {}
+    }
+    if (el && typeof el.on === 'function') {
+      el.on('plotly_click', (ev) => {
+        const t = ev && ev.points && ev.points[0] && ev.points[0].customdata;
+        if (t) openStock(root, t);
+      });
+    }
     $('#cl-map-sub', root).textContent = `The six features squeezed onto two principal components (${pct(result.pca_variance[0] + result.pca_variance[1])} of the variance). Right means riskier, up means higher return. Click a dot to open that stock.`;
   }
 
@@ -548,7 +584,11 @@ const VIEW_clustering = (() => {
       <h4 style="margin:0">Behaves most like</h4>
       <div class="chips">${d.neighbours.map((n) => `<button class="chip" data-t="${n.ticker}">${n.ticker} <small style="color:var(--ink-3)">${esc(n.sector)}</small></button>`).join('')}</div>
       <p class="note" style="margin:0">Nearest neighbours in the six-feature space, often from different sectors.</p>`;
-    $('#dr-close', dr).addEventListener('click', () => { dr.hidden = true; });
+    $('#dr-close', dr).addEventListener('click', () => {
+      dr.hidden = true;
+      highlight = null;
+      if (result) drawScatter(root);
+    });
     dr.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => openStock(root, b.dataset.t)));
     plot($('#dr-price', dr), [
       { x: d.price.dates, y: d.price.market, name: 'Market (equal weight)', line: { color: '#9aa5b4', width: 1.5 }, hovertemplate: '%{y:.2f}<extra>market</extra>' },
@@ -688,7 +728,7 @@ const VIEW_hmm = (() => {
     const traces = [{ x: s.dates, y: s.price, type: 'scatter', mode: 'lines', line: { color: '#9aa5b4', width: 1 }, hoverinfo: 'skip', showlegend: false }];
     R.names.forEach((n, k) => {
       const idx = s.state.map((v, i) => (v === k ? i : -1)).filter((i) => i >= 0);
-      traces.push({ type: 'scattergl', mode: 'markers', name: n, x: idx.map((i) => s.dates[i]), y: idx.map((i) => s.price[i]),
+      traces.push({ type: 'scatter', mode: 'markers', name: n, x: idx.map((i) => s.dates[i]), y: idx.map((i) => s.price[i]),
         marker: { color: R.colors[k], size: 4.5 }, customdata: idx.map((i) => (s.ret[i] * 100).toFixed(2)),
         hovertemplate: `%{x|%b %Y}<br>S&P %{y:,.2f}<br>return %{customdata}%<br><b>${n}</b><extra></extra>` });
     });
@@ -1175,7 +1215,7 @@ const VIEW_compare = (() => {
     plot($('#cp-vix', root), [{ x: s.dates, y: s.vix, mode: 'lines', line: { color: '#c3ccd5', width: 1 }, hoverinfo: 'skip', showlegend: false },
       ...d.names.map((n, k) => {
         const idx = s.state.map((v, i) => (v === k ? i : -1)).filter((i) => i >= 0);
-        return { type: 'scattergl', mode: 'markers', name: n, x: idx.map((i) => s.dates[i]), y: idx.map((i) => s.vix[i]), marker: { color: d.colors[k], size: 4 }, hovertemplate: `%{x|%d %b %Y}: VIX %{y:.1f}<br><b>${n}</b><extra></extra>` };
+        return { type: 'scatter', mode: 'markers', name: n, x: idx.map((i) => s.dates[i]), y: idx.map((i) => s.vix[i]), marker: { color: d.colors[k], size: 4 }, hovertemplate: `%{x|%d %b %Y}: VIX %{y:.1f}<br><b>${n}</b><extra></extra>` };
       })], { yaxis: { title: { text: 'VIX' } }, xaxis: { type: 'date' }, margin: { l: 50, r: 8, t: 30, b: 30 } });
     const order = ['Bull', 'Correction', 'Crisis'].filter((k) => k in d.fear_share_by_sp_regime);
     const col = { Bull: '#20c997', Correction: '#3d8bfd', Crisis: '#ff6b3d' };

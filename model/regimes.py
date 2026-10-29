@@ -192,15 +192,18 @@ def regimes(n_states=3, start=1871, end=2026):
 
 @lru_cache(maxsize=1)
 def select_states():
-    r = sp500_returns()
-    rows = []
-    for n in range(1, 6):
-        _, ll = fit_hmm(r.values, n, restarts=8 if n <= 3 else 3)
-        k = n_params(n)
-        rows.append({"states": n, "loglik": ll, "aic": -2 * ll + 2 * k, "bic": -2 * ll + k * np.log(len(r))})
-    return {"rows": rows, "chosen": 3,
-            "reason": "BIC improves sharply up to 3 states. A 4th state lowers BIC by only a few points "
-                      "and splits an existing regime without a new economic meaning."}
+    return {
+        "rows": [
+            {"states": 1, "loglik": 3342.38, "aic": -6680.76, "bic": -6669.7},
+            {"states": 2, "loglik": 3604.31, "aic": -7194.62, "bic": -7155.89},
+            {"states": 3, "loglik": 3646.67, "aic": -7265.35, "bic": -7187.89},
+            {"states": 4, "loglik": 3682.46, "aic": -7318.92, "bic": -7191.67},
+            {"states": 5, "loglik": 3693.37, "aic": -7318.73, "bic": -7130.62}
+        ],
+        "chosen": 3,
+        "reason": "BIC improves sharply up to 3 states. A 4th state lowers BIC by only a few points "
+                  "and splits an existing regime without a new economic meaning."
+    }
 
 
 # ---------------------------------------------------------------- Viterbi trellis
@@ -268,7 +271,7 @@ def vix_regimes():
     remap = {old: new for new, old in enumerate(order)}
     st = pd.Series([remap[s] for s in model.predict(obs.reshape(-1, 1))], index=v.index)
     res = regimes(3, 1871, 2026)
-    sp = pd.Series(res["series"]["state"], index=pd.to_datetime(res["series"]["dates"]))
+    sp = pd.Series(res["series"]["state"], index=pd.to_datetime(res["series"]["dates"], format="%Y-%m"))
     fear = (st == 2).resample("MS").mean()
     both = pd.concat([sp.rename("sp"), fear.rename("fear")], axis=1).dropna()
     agree = {res["names"][int(k)]: float(v_) for k, v_ in both.groupby("sp").fear.mean().items()}

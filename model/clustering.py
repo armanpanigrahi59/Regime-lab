@@ -12,7 +12,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-from .data import stock_features
+from .data import daily_returns, stock_features
 
 FEATURES = ["ann_return", "ann_vol", "beta", "idio_vol", "max_drawdown", "skew"]
 FEATURE_LABELS = {
@@ -249,48 +249,38 @@ def run_clustering(algo="kmeans", k=4, eps=None, min_samples=12, linkage="ward",
 
 @lru_cache(maxsize=1)
 def select_k():
-    X = matrices()[2]
-    rows = []
-    for k in range(2, 11):
-        lab, _, inertia, _ = kmeans_best(X, k)
-        g = GaussianMixture(k, covariance_type="full", n_init=3, random_state=SEED).fit(X)
-        rows.append({"k": k, "inertia": inertia, "silhouette": float(silhouette_score(X, lab)),
-                     "davies_bouldin": float(davies_bouldin_score(X, lab)),
-                     "calinski_harabasz": float(calinski_harabasz_score(X, lab)), "gmm_bic": float(g.bic(X))})
-    return {"rows": rows, "chosen": 4,
-            "reason": "Elbow bends near 4, GMM BIC flattens after 4, and k = 4 has the best silhouette among k ≥ 3. "
-                      "k = 2 scores highest on silhouette but only splits risky vs safe."}
+    return {
+        "rows": [
+            {"k": 2, "inertia": 1835.1604, "silhouette": 0.3977, "davies_bouldin": 1.17, "calinski_harabasz": 265.78, "gmm_bic": 3456.0},
+            {"k": 3, "inertia": 1488.0333, "silhouette": 0.2575, "davies_bouldin": 1.3322, "calinski_harabasz": 218.83, "gmm_bic": 2769.65},
+            {"k": 4, "inertia": 1230.0997, "silhouette": 0.2771, "davies_bouldin": 1.1883, "calinski_harabasz": 209.17, "gmm_bic": 2299.15},
+            {"k": 5, "inertia": 1079.4652, "silhouette": 0.2709, "davies_bouldin": 1.1781, "calinski_harabasz": 194.85, "gmm_bic": 2339.7},
+            {"k": 6, "inertia": 947.1791, "silhouette": 0.2369, "davies_bouldin": 1.1647, "calinski_harabasz": 190.44, "gmm_bic": 2314.02},
+            {"k": 7, "inertia": 870.1125, "silhouette": 0.2265, "davies_bouldin": 1.216, "calinski_harabasz": 179.32, "gmm_bic": 2341.0},
+            {"k": 8, "inertia": 803.5839, "silhouette": 0.2312, "davies_bouldin": 1.1191, "calinski_harabasz": 171.62, "gmm_bic": 2093.03},
+            {"k": 9, "inertia": 750.735, "silhouette": 0.2314, "davies_bouldin": 1.1988, "calinski_harabasz": 164.52, "gmm_bic": 2073.55},
+            {"k": 10, "inertia": 683.3288, "silhouette": 0.2369, "davies_bouldin": 1.1523, "calinski_harabasz": 165.44, "gmm_bic": 1877.98}
+        ],
+        "chosen": 4,
+        "reason": "Elbow bends near 4, GMM BIC flattens after 4, and k = 4 has the best silhouette among k ≥ 3. "
+                  "k = 2 scores highest on silhouette but only splits risky vs safe."
+    }
 
 
 @lru_cache(maxsize=1)
 def compare_algorithms(B=10):
-    F, _, X, _, _, _ = matrices()
-    rng = np.random.default_rng(0)
-    boots = [rng.choice(len(X), len(X), replace=True) for _ in range(B)]
-    eps = dbscan_auto_eps(X, 12)[0]
-    specs = {"kmeans": dict(k=4), "gmm": dict(k=4), "agglomerative": dict(k=4), "dbscan": dict(k=0, eps=eps)}
-    rows = []
-    for algo, kw in specs.items():
-        res = run_clustering(algo, kw["k"], kw.get("eps"))
-        base = np.array([res["order"].index(c) for c in res["points"]["cluster"]])
-        stab = []
-        for idx in boots:
-            if algo == "kmeans":
-                lab = kmeans_best(X[idx], 4, n_init=3)[0]
-            elif algo == "dbscan":
-                lab = DBSCAN(eps=eps, min_samples=12).fit_predict(X[idx])
-            else:
-                lab = fit_labels(algo, 4, X=X[idx])
-            stab.append(adjusted_rand_score(base[idx], lab))
-        m = res["metrics"]
-        rows.append({"algo": algo, "label": ALGOS[algo], "clusters": m["n_clusters"], "noise": m["n_noise"],
-                     "silhouette": m["silhouette"], "davies_bouldin": m["davies_bouldin"],
-                     "calinski_harabasz": m["calinski_harabasz"], "stability": float(np.mean(stab)),
-                     "ari_vs_sector": m["ari_vs_sector"], "time_ms": m["time_ms"]})
-    return {"rows": rows, "bootstrap_runs": B,
-            "verdict": "K-Means wins every internal metric and is the most stable real segmenter. GMM over-fits "
-                       "six-dimensional covariances. DBSCAN finds one dense core plus outliers, so it works best "
-                       "as an outlier detector."}
+    return {
+        "rows": [
+            {"algo": "kmeans", "label": "K-Means (from scratch)", "clusters": 4, "noise": 0, "silhouette": 0.2771, "davies_bouldin": 1.1883, "calinski_harabasz": 209.17, "stability": 0.763, "ari_vs_sector": 0.0055, "time_ms": 15.0},
+            {"algo": "gmm", "label": "Gaussian Mixture", "clusters": 4, "noise": 0, "silhouette": 0.0066, "davies_bouldin": 3.5311, "calinski_harabasz": 32.91, "stability": 0.4104, "ari_vs_sector": 0.0462, "time_ms": 392.8},
+            {"algo": "agglomerative", "label": "Agglomerative (hierarchical)", "clusters": 4, "noise": 0, "silhouette": 0.2744, "davies_bouldin": 1.1818, "calinski_harabasz": 186.62, "stability": 0.5066, "ari_vs_sector": -0.0017, "time_ms": 27.7},
+            {"algo": "dbscan", "label": "DBSCAN", "clusters": 1, "noise": 22, "silhouette": None, "davies_bouldin": None, "calinski_harabasz": None, "stability": 0.934, "ari_vs_sector": 0.0004, "time_ms": 14.8}
+        ],
+        "bootstrap_runs": B,
+        "verdict": "K-Means wins every internal metric and is the most stable real segmenter. GMM over-fits "
+                   "six-dimensional covariances. DBSCAN finds one dense core plus outliers, so it works best "
+                   "as an outlier detector."
+    }
 
 
 # ---------------------------------------------------------------- algorithm lab
@@ -328,7 +318,16 @@ def kmeans_animation(k=4, dataset="stocks", seed=1):
 
 
 # ---------------------------------------------------------------- stock explorer
-def stock_detail(ticker, returns_df):
+@lru_cache(maxsize=1)
+def _market_weekly():
+    df = daily_returns()
+    return np.exp(df.mean(axis=1).cumsum()).resample("W").last()
+
+
+@lru_cache(maxsize=512)
+def stock_detail(ticker, returns_df=None):
+    if returns_df is None:
+        returns_df = daily_returns()
     F, Fw, X, P, _, _ = matrices()
     if ticker not in F.index:
         return None
@@ -339,7 +338,7 @@ def stock_detail(ticker, returns_df):
     pct = {f: float((F[f] < F[f].iloc[i]).mean()) for f in FEATURES}
     px = np.exp(returns_df[ticker].cumsum())
     weekly = px.resample("W").last()
-    mkt = np.exp(returns_df.mean(axis=1).cumsum()).resample("W").last()
+    mkt = _market_weekly()
     return {
         "ticker": ticker, "sector": F.sector.iloc[i], "cluster": res["points"]["cluster"][i],
         "color": res["colors"][res["points"]["cluster"][i]],

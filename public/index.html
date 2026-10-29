@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Regime Lab · Clustering + HMM</title>
+  <meta name="description" content="Clustering 477 S&P 500 stocks and decoding 155 years of hidden market regimes with a Hidden Markov Model.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect x='1' y='6' width='8' height='18' rx='2' fill='%2320c997'/%3E%3Crect x='11' y='6' width='8' height='18' rx='2' fill='%233d8bfd'/%3E%3Crect x='21' y='6' width='8' height='18' rx='2' fill='%23ff6b3d'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/plotly.min.js"></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><i style="background:var(--bull)"></i><i style="background:var(--corr)"></i><i style="background:var(--crisis)"></i></div>
+      <h1>Regime Lab</h1>
+      <p>Clustering + Hidden Markov Models on 155 years of the S&amp;P 500</p>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <a href="#overview"><span class="n">1</span>Overview<small>Problem, data, today's regime</small></a>
+      <a href="#clustering"><span class="n">2</span>Clustering studio<small>Group 477 stocks by behaviour</small></a>
+      <a href="#hmm"><span class="n">3</span>Market regimes<small>Fit the Hidden Markov Model</small></a>
+      <a href="#lab"><span class="n">4</span>Algorithm lab<small>Watch K-Means and Viterbi step</small></a>
+      <a href="#compare"><span class="n">5</span>Comparison<small>Which model wins, and why</small></a>
+      <a href="#backtest"><span class="n">6</span>Backtest<small>Does the regime pay, out of sample?</small></a>
+      <a href="#fusion"><span class="n">7</span>Fusion<small>What to hold in which regime</small></a>
+    </nav>
+    <div class="rail-foot">
+      <div class="status" id="status"><i></i><span>Connecting to the model server…</span></div>
+      <a href="/docs" target="_blank" rel="noopener">API reference (live)</a>
+      <span>PBL-2 · Unsupervised learning</span>
+    </div>
+  </aside>
+  <main id="main" tabindex="-1"></main>
+</div>
+<script src="/script.js" defer></script>
+</body>
+</html>
